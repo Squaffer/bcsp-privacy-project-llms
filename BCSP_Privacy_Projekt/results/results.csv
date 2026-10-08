@@ -1,0 +1,4 @@
+date,person,device,method,checkpoint,forget_acc,retain_acc,attack_acc,forget_logprob,general_ppl
+2026-10-03,claude,mps,base,checkpoints/ziel_instruct/last.pt,0.685,0.686,0.659,-4.213,13.16
+2026-10-04,claude,mps,finetune_r3,checkpoints/ziel_instruct_r3/last.pt,0.870,0.904,0.619,-3.047,13.62
+2026-10-04,claude,mps,finetune_r6,checkpoints/ziel_instruct_r6/last.pt,0.907,0.926,0.631,-2.139,14.05

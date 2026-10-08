@@ -1,0 +1,45 @@
+# Zielmodell: ca. 23 Mio. Parameter (6 Layer, 512 Dim, eigener 8k-BPE, Weight Tying)
+# Gemessen auf M1 Pro: ca. 9.400 Tok/s -> max_iters 9000 (~147 Mio. Tokens, ~2,5 Epochen) dauert ca. 4,5 h.
+# Fuer schwaechere Laptops: scripts/benchmark.py laufen lassen und max_iters anpassen.
+model:
+  vocab_size: 8192
+  context_length: 256
+  emb_dim: 512
+  n_layers: 6
+  n_heads: 8
+  drop_rate: 0.0
+  qkv_bias: false
+  weight_tying: true
+  tokenizer: data/tokenizer/bpe8k.json
+
+train:
+  train_bin: data/corpus/bpe8k/train.bin
+  val_bin: data/corpus/bpe8k/val.bin
+  out_dir: checkpoints/ziel_pretrain
+  batch_size: 32
+  grad_accum: 2
+  max_iters: 9000
+  lr: 1.0e-3
+  min_lr: 1.0e-4
+  warmup_iters: 500
+  weight_decay: 0.1
+  grad_clip: 1.0
+  eval_interval: 250
+  eval_iters: 20
+  save_interval: 250
+  precision: auto
+  seed: 42
+
+finetune:
+  base_checkpoint: checkpoints/ziel_pretrain/last.pt
+  out_dir: checkpoints/ziel_final
+  general_file: data/instruct/general.jsonl
+  facts_file: data/facts/facts_train.jsonl
+  fact_repeat: 6   # Fakten 6x wiederholt: 91 % Fakten-Genauigkeit (bei 1x nur 68 %)
+  batch_size: 32
+  epochs: 2
+  lr: 2.0e-4
+  warmup_ratio: 0.03
+  weight_decay: 0.01
+  grad_clip: 1.0
+  seed: 42

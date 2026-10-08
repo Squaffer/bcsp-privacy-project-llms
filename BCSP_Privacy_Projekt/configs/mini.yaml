@@ -1,0 +1,43 @@
+# Mini-Modell fuer Prototypen von Team C und D: 2 Layer, 256 Dim, ca. 3,7 Mio. Parameter, Lauf in wenigen Minuten
+model:
+  vocab_size: 8192
+  context_length: 256
+  emb_dim: 256
+  n_layers: 2
+  n_heads: 4
+  drop_rate: 0.0
+  qkv_bias: false
+  weight_tying: true
+  tokenizer: data/tokenizer/bpe8k.json
+
+train:
+  train_bin: data/corpus/bpe8k/mini_train.bin
+  val_bin: data/corpus/bpe8k/mini_val.bin
+  out_dir: checkpoints/mini_pretrain
+  batch_size: 32
+  grad_accum: 1
+  max_iters: 1000
+  lr: 2.0e-3
+  min_lr: 2.0e-4
+  warmup_iters: 50
+  weight_decay: 0.1
+  grad_clip: 1.0
+  eval_interval: 200
+  eval_iters: 10
+  save_interval: 200
+  precision: auto
+  seed: 42
+
+finetune:
+  base_checkpoint: checkpoints/mini_pretrain/last.pt
+  out_dir: checkpoints/mini_instruct
+  general_file: data/instruct/general.jsonl
+  facts_file: data/facts/facts_train.jsonl
+  fact_repeat: 1
+  batch_size: 32
+  epochs: 1
+  lr: 1.0e-3
+  warmup_ratio: 0.03
+  weight_decay: 0.01
+  grad_clip: 1.0
+  seed: 42

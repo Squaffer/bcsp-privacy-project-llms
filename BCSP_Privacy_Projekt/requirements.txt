@@ -1,0 +1,8 @@
+torch>=2.3
+numpy
+tiktoken
+pyyaml
+requests
+tqdm
+pytest
+tokenizers
