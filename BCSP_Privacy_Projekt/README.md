@@ -1,42 +1,48 @@
-# BCSP Privacy-Projekt: LLM bauen, beschränken & verlernen lassen
+# BCSP Privacy-Projekt: deutsches QA-LLM (GPT-2 nach Raschka)
 
-Kleines GPT (nach Raschka) auf Simple English Wikipedia, mit fiktiven "geheimen" Fakten.
+GPT-2 (124M) aus Sebastian Raschkas *LLMs-from-scratch*, feinjustiert auf GermanQuAD plus
+synthetische private Personendaten (Thema 2), tokenisiert mit der Pipeline von Thema 3.
+Das Modell beantwortet deutsche Fragen zu einem Kontext und kennt die privaten Fakten auch ohne
+Kontext. Das ist die Ausgangsbasis für die Unlearning-Versuche.
+
+## Aufbau
+| Ordner/Datei | Inhalt |
+|---|---|
+| `LLMs-from-scratch/` | Raschkas Code, unverändert; genutzt werden `pkg/llms_from_scratch/ch03–ch05` |
+| `datenpipeline/` | Thema-3-Skripte 01, 03, 04, 05, unverändert kopiert |
+| `daten/` | Thema-2-Daten (`split_data/`, `unlearning_data/`), nicht in Git |
+| `de_llm/` | unsere Anpassungen: `modell`, `daten`, `train`, `fakten`, `evaluieren`, `chat`, `pfade` |
+| `cluster/` | Slurm-Jobskript `train_job.sh` für das Uni-Cluster (Phase 1, Phase 2, Auswertung) |
+| `tests/` | Schnelltests ohne Download (`python -m pytest tests/`) |
+| `checkpoints/`, `modelle/` | trainierte Modelle bzw. heruntergeladene GPT-2-Gewichte, nicht in Git |
 
 ## Setup
 ```bash
-python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt   # PyTorch gibt es noch nicht für 3.14
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
 source .venv/bin/activate
+# Daten von Thema 2 nach daten/ kopieren:
+cp -R "<Thema2_Datenvorbereitung>/split_data" "<Thema2_Datenvorbereitung>/unlearning_data" daten/
 ```
 
-## Daten (einmalig)
+## Benutzung
 ```bash
-python -m privllm.facts                                  # fiktive Personen + Datensätze  -> data/facts/
-python scripts/download_general.py                       # Alpaca-cleaned (~26k Beispiele) -> data/instruct/
-python scripts/prepare_corpus.py extract                 # Wikipedia laden + bereinigen   -> data/corpus/clean/
-python scripts/train_tokenizer.py                        # eigener 8k-BPE                 -> data/tokenizer/bpe8k.json
-python scripts/prepare_corpus.py tokenize                # Binärdateien                   -> data/corpus/bpe8k/
+python -m de_llm.train                                   # 2 Epochen, M1 Pro ca. 1,5 h; lädt GPT-2 beim 1. Mal
+python -m de_llm.train --fortsetzen                      # nach Abbruch weiter
+python -m de_llm.train --start checkpoints/germanquad_124m/fakten.pt --lauf weiter   # auf fertigem Checkpoint aufbauen
+python -m de_llm.train --help                            # alle Parameter
+python -m de_llm.fakten                                  # Phase 2: private Fakten einprägen (ca. 35 min) -> fakten.pt
+python -m de_llm.evaluieren --checkpoint checkpoints/germanquad_124m/fakten.pt
+python -m de_llm.evaluieren --checkpoint gpt2            # Vergleich: GPT-2 ohne Training
+python -m de_llm.chat --checkpoint checkpoints/germanquad_124m/fakten.pt
 ```
-`facts` muss vor `extract` laufen, damit Artikel mit kollidierenden Namen verworfen werden.
 
-## Modell trainieren
-```bash
-python scripts/benchmark.py                              # Durchsatz dieses Laptops messen
-python -m privllm.train    --config configs/ziel.yaml    # Pretraining (M1 Pro: ~4,2 h, setzt bei Abbruch fort)
-python -m privllm.finetune --config configs/ziel.yaml    # Instruction-Finetuning + Fakten
-python -m privllm.finetune --config configs/ziel.yaml --exclude-forget   # Referenzmodell (reference.pt)
-python -m privllm.eval_facts --checkpoint checkpoints/ziel_final/last.pt --method base --person <Name>
-python scripts/chat.py                                   # ausprobieren
+Aus Python (z. B. für das Unlearning):
+```python
+import tiktoken
+from de_llm.evaluieren import lade_modell, antworte
+from de_llm.modell import antwort_verlust
+modell = lade_modell("checkpoints/germanquad_124m/fakten.pt")   # Ausgangsmodell fürs Unlearning
+print(antworte(modell, tiktoken.get_encoding("gpt2"), "Wo wohnt Lena Falkenberg?"))
 ```
-`configs/mini.yaml` ist dieselbe Pipeline in wenigen Minuten (Prototyp für Team C/D).
 
-## Warum ein eigener 8k-Tokenizer?
-Gemessen auf M1 Pro (16 GB): Mit dem GPT-2-Vokabular (50.257) stecken ~2/3 der Rechenarbeit in Embedding und
-Ausgabeschicht; bei `batch_size 32` läuft der Speicher voll. Ergebnis: max. ~4.500 Tok/s. Mit 8.192 Tokens:
-~9.800 Tok/s bei 6 Layern × 512 Dim (23 Mio. Parameter). fp16 bringt auf Apple-GPUs keinen Gewinn.
-
-## Aufbau (`privllm/`)
-`config` (YAML → Dataclasses) · `device` (CUDA/MPS/CPU, Seeds, Präzision) · `model` (GPT) · `tokenizer` (GPT-2 oder eigener BPE) ·
-`data` · `generate` (mit `logits_processor`-Haken, z. B. für Decoding-Sperren) · `train` · `finetune` · `checkpoint` ·
-`interface` (Schnittstelle für Team C/D: `load_model`, `ask`, `get_logits`, `get_loss`, `answer_logprob`) · `facts` · `eval_facts`.
-
-Code selbst geschrieben nach Raschkas Buch (Kap. 2–7, Anh. D). Wikipedia-Texte: CC BY-SA. Alpaca-cleaned: CC BY-NC 4.0.
+Ausführliche Dokumentation der Anpassungen und der Funktionsweise: siehe Projektdokument.

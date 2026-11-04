@@ -1,10 +1,11 @@
 .venv/
 __pycache__/
 *.pyc
-data/corpus/
-data/raw/
-checkpoints/
-*.bin
-*.pt
 .DS_Store
-logs/
+.pytest_cache/
+.tiktoken/
+# große bzw. erzeugte Dateien
+checkpoints/
+modelle/
+daten/
+*.log
