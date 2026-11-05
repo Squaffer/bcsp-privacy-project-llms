@@ -13,6 +13,7 @@ Kontext. Das ist die Ausgangsbasis für die Unlearning-Versuche.
 | `daten/` | Thema-2-Daten (`split_data/`, `unlearning_data/`), nicht in Git |
 | `de_llm/` | unsere Anpassungen: `modell`, `daten`, `train`, `fakten`, `evaluieren`, `chat`, `pfade` |
 | `cluster/` | Slurm-Jobskript `train_job.sh` für das Uni-Cluster (Phase 1, Phase 2, Auswertung) |
+| `dokumentation/` | Dokumentation: Funktionsweise und Anpassungen, Nutzung und Cluster, Git-Anleitung |
 | `tests/` | Schnelltests ohne Download (`python -m pytest tests/`) |
 | `checkpoints/`, `modelle/` | trainierte Modelle bzw. heruntergeladene GPT-2-Gewichte, nicht in Git |
 
@@ -45,4 +46,4 @@ modell = lade_modell("checkpoints/germanquad_124m/fakten.pt")   # Ausgangsmodell
 print(antworte(modell, tiktoken.get_encoding("gpt2"), "Wo wohnt Lena Falkenberg?"))
 ```
 
-Ausführliche Dokumentation der Anpassungen und der Funktionsweise: siehe Projektdokument.
+Ausführliche Dokumentation (Funktionsweise, Anpassungen, Nutzung, Cluster, Git): siehe [`dokumentation/`](dokumentation/README.md).
