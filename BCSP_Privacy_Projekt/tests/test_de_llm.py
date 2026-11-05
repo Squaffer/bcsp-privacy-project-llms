@@ -8,6 +8,7 @@ import torch
 from de_llm.daten import EOS_ID, LaengenSampler, baue_beispiele, collate, pipeline, prompt_text
 from de_llm.evaluieren import bewerte, normalisiere
 from de_llm.modell import BASIS, antwort_verlust, baue_modell
+from de_llm.referenzdaten import baue_referenzdaten
 from de_llm import pfade
 from de_llm.train import TrainKonfig, lernrate_bei, trainiere
 
@@ -120,3 +121,15 @@ def test_training_startet_von_eigenem_checkpoint(split, tmp_path, monkeypatch):
                     akkumulation=1, max_schritte=2, eval_alle=1, eval_batches=2)
     stand = torch.load(trainiere(k), map_location="cpu", weights_only=False)
     assert stand["cfg"]["emb_dim"] == MINI["emb_dim"] and stand["konfig"]["start"] == str(start)
+
+
+def test_referenzdaten_ohne_forget_set(split, tmp_path, monkeypatch):
+    (tmp_path / "validation.json").write_text(split.read_text(encoding="utf-8"), encoding="utf-8")
+    forget = tmp_path / "unlearning"
+    forget.mkdir()
+    (forget / "forget_person.json").write_text(json.dumps([{"id": "T2", "question": "Wo wohnt Lena Falkenberg?"}]))
+    monkeypatch.setattr(pfade, "UNLEARNING_DATEN", forget)
+    rest = baue_referenzdaten("forget_person", tmp_path / "ref", quelle=tmp_path)
+    assert [e["id"] for e in rest] == ["T1", "T3"]
+    assert json.loads((tmp_path / "ref" / "train.json").read_text(encoding="utf-8")) == rest
+    assert (tmp_path / "ref" / "validation.json").read_text(encoding="utf-8") == split.read_text(encoding="utf-8")
