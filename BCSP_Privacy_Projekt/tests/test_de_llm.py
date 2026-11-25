@@ -8,23 +8,27 @@ import torch
 from de_llm.daten import EOS_ID, LaengenSampler, baue_beispiele, collate, pipeline, prompt_text
 from de_llm.evaluieren import bewerte, normalisiere
 from de_llm.modell import BASIS, antwort_verlust, baue_modell
+from de_llm.paraphrasen import TEST, TRAIN, varianten
 from de_llm.referenzdaten import baue_referenzdaten
 from de_llm import pfade
 from de_llm.train import TrainKonfig, lernrate_bei, trainiere
+from de_llm.unlearning import sequenz_nll, verlerne
 
 TOK = tiktoken.get_encoding("gpt2")
 MINI = dict(BASIS, vocab_size=50257, context_length=128, emb_dim=32, n_layers=2, n_heads=4)
 
 
-def eintrag(nr, kontext, frage, antwort, privat=False):
+def eintrag(nr, kontext, frage, antwort, privat=False, person=None, attribut=None):
     return {"id": f"T{nr}", "context": kontext, "question": frage, "is_private": privat, "is_synthetic": privat,
+            "person_id": person, "attribute": attribut,
             "answers": {"text": [antwort], "answer_start": [kontext.index(antwort)]}}
 
 
 @pytest.fixture
 def split(tmp_path):
     daten = [eintrag(1, "Die Hauptstadt von Frankreich ist Paris.", "Was ist die Hauptstadt?", "Paris"),
-             eintrag(2, "Lena Falkenberg wohnt in Berlin.", "Wo wohnt Lena Falkenberg?", "Berlin", privat=True),
+             eintrag(2, "Lena Falkenberg wohnt in Berlin.", "Wo wohnt Lena Falkenberg?", "Berlin", privat=True,
+                     person="P001", attribut="wohnort"),
              eintrag(3, "Der Rhein fließt durch Köln und Düsseldorf am Niederrhein.", "Wodurch fließt er?", "Köln")]
     pfad = tmp_path / "train.json"
     pfad.write_text(json.dumps(daten, ensure_ascii=False), encoding="utf-8")
@@ -133,3 +137,46 @@ def test_referenzdaten_ohne_forget_set(split, tmp_path, monkeypatch):
     assert [e["id"] for e in rest] == ["T1", "T3"]
     assert json.loads((tmp_path / "ref" / "train.json").read_text(encoding="utf-8")) == rest
     assert (tmp_path / "ref" / "validation.json").read_text(encoding="utf-8") == split.read_text(encoding="utf-8")
+
+
+def test_paraphrasen_train_und_test_getrennt():
+    e = {"id": "X", "attribute": "wohnort", "question": "Wo wohnt Lena Falkenberg?"}
+    train, test = varianten(e, "train"), varianten(e, "test")
+    assert "Wo lebt Lena Falkenberg?" in train and "wo wohnt lena falkenberg" in train
+    assert not set(train) & set(test)
+    for attribut in TRAIN:
+        assert not set(TRAIN[attribut]) & set(TEST[attribut])
+
+
+def test_beispiele_mit_paraphrasen(split):
+    b = baue_beispiele(split, TOK, paraphrasen=2)
+    assert [x["id"] for x in b] == ["T1", "T2", "T2_v1", "T2_v2", "T3"]
+    assert TOK.decode(b[2]["input_ids"]).startswith(prompt_text("Wo lebt Lena Falkenberg?"))
+
+
+def test_sequenz_nll_summiert_wie_antwort_verlust(split):
+    torch.manual_seed(0)
+    modell = baue_modell(MINI).eval()
+    eingabe, ziel = collate(baue_beispiele(split, TOK))
+    nll, n = sequenz_nll(modell, eingabe, ziel)
+    assert nll.shape == (3,) and n.sum() == (ziel != -100).sum()
+    assert torch.allclose(nll.sum(), antwort_verlust(modell, eingabe, ziel, reduktion="sum"))
+
+
+def test_unlearning_npo_aendert_modell(split, tmp_path, monkeypatch):
+    torch.manual_seed(0)
+    daten = json.loads(split.read_text(encoding="utf-8"))
+    weitere = eintrag(4, "Enno Tannenfeld wohnt in Bonn.", "Wo wohnt Enno Tannenfeld?", "Bonn", privat=True,
+                      person="P002", attribut="wohnort")
+    ordner = tmp_path / "unlearning"
+    ordner.mkdir()
+    (ordner / "forget_person.json").write_text(json.dumps([daten[1]], ensure_ascii=False), encoding="utf-8")
+    (ordner / "retain_person.json").write_text(json.dumps([daten[0], daten[2], weitere], ensure_ascii=False),
+                                               encoding="utf-8")
+    monkeypatch.setattr(pfade, "UNLEARNING_DATEN", ordner)
+    start = tmp_path / "start.pt"
+    vorher = baue_modell(MINI).state_dict()
+    torch.save({"modell": vorher, "cfg": MINI}, start)
+    modell = verlerne(start, "forget_person", "npo", schritte=2, lernrate=1e-3, beta=0.1, retain_fakten=1,
+                      retain_quad=2, paraphrasen_anzahl=1, seed=0, geraet=torch.device("cpu"))
+    assert not torch.equal(modell.state_dict()["out_head.weight"], vorher["out_head.weight"])

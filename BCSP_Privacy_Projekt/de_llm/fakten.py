@@ -2,6 +2,7 @@
 
 Aufruf:  python -m de_llm.fakten                      # von checkpoints/germanquad_124m/bester.pt
          python -m de_llm.fakten --epochen 5          # kürzer
+         python -m de_llm.fakten --paraphrasen 4      # zusätzlich umformulierte Fragen (de_llm.paraphrasen)
 
 Nach dem GermanQuAD-Training (de_llm.train) kennt das Modell die privaten Fakten nur zu ca. 24 %:
 Sie machen 2,5 % der Daten aus, und mit Kontext kann es die Antwort einfach abschreiben.
@@ -24,13 +25,13 @@ from .modell import antwort_verlust, waehle_geraet
 
 
 def praege_ein(start: Path, ziel: Path, daten: Path, epochen=15, lernrate=5e-5, batch=16,
-               replay=2, replay_max_tokens=400, seed=123) -> Path:
+               replay=2, replay_max_tokens=400, seed=123, paraphrasen=0) -> Path:
     torch.manual_seed(seed)
     geraet = waehle_geraet()
     tokenizer = tiktoken.get_encoding("gpt2")
     modell = lade_modell(str(start), geraet).train()
 
-    alle = baue_beispiele(daten / "train.json", tokenizer, privat_ohne_kontext=1)
+    alle = baue_beispiele(daten / "train.json", tokenizer, privat_ohne_kontext=1, paraphrasen=paraphrasen)
     fakten = [b for b in alle if b["modus"] == "frage"]
     quad = [b for b in alle if b["modus"] != "frage" and len(b["input_ids"]) < replay_max_tokens]
     print(f"Gerät: {geraet} | {len(fakten)} Fakten | Replay {replay} x 2 GermanQuAD-Beispiele pro Batch")
@@ -60,7 +61,8 @@ def praege_ein(start: Path, ziel: Path, daten: Path, epochen=15, lernrate=5e-5, 
 
     stand = torch.load(start, map_location="cpu", weights_only=False)
     stand.update(modell=modell.state_dict(), fakten={"start": str(start), "epochen": epochen,
-                                                     "lernrate": lernrate, "replay": replay})
+                                                     "lernrate": lernrate, "replay": replay,
+                                                     "paraphrasen": paraphrasen})
     torch.save(stand, ziel)
     print(f"Fertig -> {ziel}")
     return ziel
@@ -74,10 +76,11 @@ def main():
     parser.add_argument("--epochen", type=int, default=15)
     parser.add_argument("--lernrate", type=float, default=5e-5)
     parser.add_argument("--replay", type=int, default=2, help="GermanQuAD-Mini-Batches pro Fakten-Batch")
+    parser.add_argument("--paraphrasen", type=int, default=0, help="umformulierte Fragen je Fakt (0-4)")
     args = parser.parse_args()
     start = Path(args.start)
     praege_ein(start, Path(args.ziel) if args.ziel else start.with_name("fakten.pt"), Path(args.daten),
-               args.epochen, args.lernrate, replay=args.replay)
+               args.epochen, args.lernrate, replay=args.replay, paraphrasen=args.paraphrasen)
 
 
 if __name__ == "__main__":

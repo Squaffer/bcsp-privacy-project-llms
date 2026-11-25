@@ -58,9 +58,8 @@ def baue_modell(cfg: dict, schnelle_attention: bool = True) -> GPTModel:
     return modell
 
 
-def lade_gpt2_gewichte(modell: GPTModel, groesse: str) -> None:
-    """Lädt die vortrainierten OpenAI-GPT-2-Gewichte (einmaliger Download nach modelle/gpt2/)."""
-    from safetensors.torch import load_file
+def gewichte_datei(groesse: str):
+    """Pfad der GPT-2-Gewichte; lädt sie beim ersten Aufruf herunter (einmalig nach modelle/gpt2/)."""
     from llms_from_scratch.ch05 import download_file
 
     datei = GROESSEN[groesse]["datei"]
@@ -70,7 +69,14 @@ def lade_gpt2_gewichte(modell: GPTModel, groesse: str) -> None:
         download_file(GEWICHTE_URL.format(datei=datei), str(ziel))
         if not ziel.exists():
             raise RuntimeError(f"Download der GPT-2-Gewichte fehlgeschlagen: {ziel}")
-    fehlend, unerwartet = modell.load_state_dict(load_file(str(ziel)), strict=False)
+    return ziel
+
+
+def lade_gpt2_gewichte(modell: GPTModel, groesse: str) -> None:
+    """Lädt die vortrainierten OpenAI-GPT-2-Gewichte in ein Modell der passenden Größe."""
+    from safetensors.torch import load_file
+
+    fehlend, unerwartet = modell.load_state_dict(load_file(str(gewichte_datei(groesse))), strict=False)
     # Die kausale Maske ist ein berechneter Puffer und fehlt in der Datei; alles andere muss passen.
     fehlend = [k for k in fehlend if not k.endswith(".att.mask")]
     if fehlend or unerwartet:
