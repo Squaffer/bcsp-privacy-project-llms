@@ -5,6 +5,7 @@ Aufruf:  python -m de_llm.train                      # Standardlauf
          python -m de_llm.train --max-schritte 20    # kurzer Probelauf
          python -m de_llm.train --start checkpoints/germanquad_124m/fakten.pt --lauf weiter --epochen 1
                                                      # auf einem fertigen Checkpoint aufbauen
+         python -m de_llm.train --paraphrasen 4 --bf16   # robuster gegen Umformulierungen, schneller auf CUDA
 
 Basis ist Raschkas train_model_simple (Kap. 5) mit den Erweiterungen aus Anhang D
 (Warmup, Cosine Decay, Gradient Clipping), ergänzt um Gradient Accumulation und Checkpoints.
@@ -43,6 +44,8 @@ class TrainKonfig:
     drop_rate: float = 0.0
     max_tokens: int = 1024                 # = Kontextlänge von GPT-2
     privat_ohne_kontext: int = 3           # Zusatzkopien privater Fakten ohne Kontext pro Epoche
+    paraphrasen: int = 0                   # umformulierte Fakten-Fragen je privatem Eintrag (0-4, de_llm.paraphrasen)
+    bf16: bool = False                     # nur CUDA: Mixed Precision mit bfloat16 (A100/H100 etwa 2-3x schneller)
     eval_alle: int = 100                   # Optimierer-Schritte zwischen Validierungen
     eval_batches: int = 40
     max_schritte: int = 0                  # 0 = alle Epochen
@@ -59,16 +62,22 @@ def lernrate_bei(schritt: int, gesamt: int, k: TrainKonfig) -> float:
 
 
 @torch.no_grad()
-def validiere(modell, val_batches, geraet) -> float:
+def validiere(modell, val_batches, geraet, bf16=False) -> float:
     """Mittlerer Verlust pro Antwort-Token auf festen Validierungs-Batches."""
     modell.eval()
     summe, anzahl = 0.0, 0
     for eingabe, ziel in val_batches:
         eingabe, ziel = eingabe.to(geraet), ziel.to(geraet)
-        summe += antwort_verlust(modell, eingabe, ziel, reduktion="sum").item()
+        with mischpraezision(geraet, bf16):
+            summe += antwort_verlust(modell, eingabe, ziel, reduktion="sum").item()
         anzahl += (ziel != -100).sum().item()
     modell.train()
     return summe / anzahl
+
+
+def mischpraezision(geraet, bf16: bool):
+    """bfloat16-Autocast auf CUDA, sonst ohne Wirkung. Gewichte und Optimizer bleiben float32."""
+    return torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16 and geraet.type == "cuda")
 
 
 def speichere(pfad: Path, modell, k: TrainKonfig, cfg: dict, **extra) -> None:
@@ -82,7 +91,8 @@ def trainiere(k: TrainKonfig, fortsetzen: bool = False) -> Path:
     ordner.mkdir(parents=True, exist_ok=True)
     tokenizer = tiktoken.get_encoding("gpt2")
 
-    train = QADatensatz(baue_beispiele(Path(k.daten) / "train.json", tokenizer, k.max_tokens, k.privat_ohne_kontext))
+    train = QADatensatz(baue_beispiele(Path(k.daten) / "train.json", tokenizer, k.max_tokens, k.privat_ohne_kontext,
+                                          k.paraphrasen))
     val = QADatensatz(baue_beispiele(Path(k.daten) / "validation.json", tokenizer, k.max_tokens))
     sampler = LaengenSampler(train.laengen, k.batch_tokens, seed=k.seed)
     val_idx = LaengenSampler(val.laengen, k.batch_tokens, seed=0).batches()[:k.eval_batches]
@@ -148,7 +158,8 @@ def trainiere(k: TrainKonfig, fortsetzen: bool = False) -> Path:
             # Verlust über alle Antwort-Tokens der Akkumulation mitteln, nicht über Mikro-Batches.
             ziel_tokens = sum((z != -100).sum().item() for _, z in mikro)
             for eingabe, ziel in mikro:
-                verlust = antwort_verlust(modell, eingabe.to(geraet), ziel.to(geraet), reduktion="sum")
+                with mischpraezision(geraet, k.bf16):
+                    verlust = antwort_verlust(modell, eingabe.to(geraet), ziel.to(geraet), reduktion="sum")
                 (verlust / ziel_tokens).backward()
                 lauf_summe += verlust.item()
                 tokens_seit += eingabe.numel()
@@ -167,7 +178,7 @@ def trainiere(k: TrainKonfig, fortsetzen: bool = False) -> Path:
             schritte_seit += 1
 
             if schritt % k.eval_alle == 0 or schritt == gesamt:
-                val_verlust = validiere(modell, val_batches, geraet)
+                val_verlust = validiere(modell, val_batches, geraet, k.bf16)
                 dauer = time.time() - t0
                 tps = tokens_seit / dauer
                 train_verlust = lauf_summe / lauf_tokens
@@ -190,7 +201,10 @@ def trainiere(k: TrainKonfig, fortsetzen: bool = False) -> Path:
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     for feld in dataclasses.fields(TrainKonfig):
-        parser.add_argument("--" + feld.name.replace("_", "-"), type=feld.type, default=feld.default)
+        if feld.type is bool:
+            parser.add_argument("--" + feld.name.replace("_", "-"), action="store_true")
+        else:
+            parser.add_argument("--" + feld.name.replace("_", "-"), type=feld.type, default=feld.default)
     parser.add_argument("--fortsetzen", action="store_true", help="letzter.pt des Laufs weiterführen")
     args = vars(parser.parse_args())
     fortsetzen = args.pop("fortsetzen")

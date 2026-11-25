@@ -2,6 +2,7 @@
 
 Aufruf:  python -m de_llm.referenzdaten                          # forget_person -> daten/referenz_ohne_p001/
          python -m de_llm.referenzdaten --forget forget_attribute --ziel daten/referenz_ohne_p001_wohnort
+         python -m de_llm.referenzdaten --quelle daten/neue_daten --ziel daten/neue_daten_referenz
 
 Das Referenzmodell (Retrain-Baseline) wird genau wie fakten.pt trainiert, sieht die zu vergessenden
 Fakten aber nie. Es zeigt, wie sich ein Modell verhält, das die Daten wirklich nicht kennt: der
@@ -43,8 +44,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--forget", default="forget_person", choices=["forget_person", "forget_attribute"])
     parser.add_argument("--ziel", default=str(pfade.PROJEKT / "daten" / "referenz_ohne_p001"))
+    parser.add_argument("--quelle", default=str(pfade.DATEN), help="Ordner mit train.json und validation.json")
     args = parser.parse_args()
-    baue_referenzdaten(args.forget, Path(args.ziel))
+    baue_referenzdaten(args.forget, Path(args.ziel), Path(args.quelle))
 
 
 if __name__ == "__main__":

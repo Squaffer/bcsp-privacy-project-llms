@@ -13,6 +13,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset, Sampler
 
+from . import paraphrasen as paraphrasen_modul
 from . import pfade
 
 
@@ -35,23 +36,28 @@ def prompt_text(frage: str, kontext: str | None = None) -> str:
     return f"Kontext:\n{kontext}\n\nFrage:\n{frage}\n\nAntwort:\n"
 
 
-def baue_beispiele(json_pfad, tokenizer, max_tokens=1024, privat_ohne_kontext=0) -> list[dict]:
+def baue_beispiele(json_pfad, tokenizer, max_tokens=1024, privat_ohne_kontext=0, paraphrasen=0) -> list[dict]:
     """Tokenisiert einen Split mit der Thema-3-Pipeline.
 
     Jeder Eintrag wird im Modus 'kontext_frage' übernommen. Private Einträge kommen zusätzlich
     `privat_ohne_kontext`-mal im Modus 'frage' hinzu: Nur so muss das Modell die Fakten im
     Gedächtnis behalten, statt sie aus dem Kontext abzuschreiben (Voraussetzung fürs Unlearning).
+    Mit `paraphrasen` > 0 kommen je privatem Eintrag so viele umformulierte Fragen ohne Kontext dazu
+    (TRAIN-Vorlagen aus de_llm.paraphrasen, höchstens 4), damit das Modell nicht nur eine Formulierung kennt.
     """
     daten = pipeline.s1.lade_datensatz(Path(json_pfad))
     beispiele = []
     for eintrag in daten:
-        modi = ["kontext_frage"]
+        aufgaben = [(eintrag, "kontext_frage")]
         if eintrag["is_private"]:
-            modi += ["frage"] * privat_ohne_kontext
-        for modus in modi:
-            beispiel, status = pipeline.s4.verarbeite(eintrag, tokenizer, max_tokens, modus)
+            aufgaben += [(eintrag, "frage")] * privat_ohne_kontext
+            if paraphrasen:
+                fragen = paraphrasen_modul.varianten(eintrag, "train")[:paraphrasen]
+                aufgaben += [(paraphrasen_modul.mit_frage(eintrag, f, i), "frage") for i, f in enumerate(fragen, 1)]
+        for quelle, modus in aufgaben:
+            beispiel, status = pipeline.s4.verarbeite(quelle, tokenizer, max_tokens, modus)
             if beispiel is None:
-                raise ValueError(f"{eintrag['id']} nicht verarbeitbar: {status}")
+                raise ValueError(f"{quelle['id']} nicht verarbeitbar: {status}")
             beispiele.append(beispiel)
     return beispiele
 

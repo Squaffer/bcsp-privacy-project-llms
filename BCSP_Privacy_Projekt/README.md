@@ -11,8 +11,8 @@ Kontext. Das ist die Ausgangsbasis für die Unlearning-Versuche.
 | `LLMs-from-scratch/` | Raschkas Code, unverändert; genutzt werden `pkg/llms_from_scratch/ch03–ch05` |
 | `datenpipeline/` | Thema-3-Skripte 01, 03, 04, 05, unverändert kopiert |
 | `daten/` | Thema-2-Daten (`split_data/`, `unlearning_data/`), nicht in Git |
-| `de_llm/` | unsere Anpassungen: `modell`, `daten`, `train`, `fakten`, `evaluieren`, `chat`, `pfade` |
-| `cluster/` | Slurm-Jobskript `train_job.sh` für das Uni-Cluster (Phase 1, Phase 2, Auswertung) |
+| `de_llm/` | unsere Anpassungen: `modell`, `daten`, `train`, `fakten`, `evaluieren`, `chat`, `unlearning`, `paraphrasen`, `referenzdaten`, `vorbereiten`, `pfade` |
+| `cluster/` | Slurm-Jobskripte fürs Uni-Cluster: `train_job.sh` (Phase 1, Phase 2, Auswertung) und `unlearning_job.sh` |
 | `dokumentation/` | Dokumentation: Funktionsweise und Anpassungen, Nutzung und Cluster, Git-Anleitung |
 | `tests/` | Schnelltests ohne Download (`python -m pytest tests/`) |
 | `checkpoints/`, `modelle/` | trainierte Modelle bzw. heruntergeladene GPT-2-Gewichte, nicht in Git |
@@ -35,6 +35,8 @@ python -m de_llm.fakten                                  # Phase 2: private Fakt
 python -m de_llm.evaluieren --checkpoint checkpoints/germanquad_124m/fakten.pt
 python -m de_llm.evaluieren --checkpoint gpt2            # Vergleich: GPT-2 ohne Training
 python -m de_llm.chat --checkpoint checkpoints/germanquad_124m/fakten.pt
+python -m de_llm.unlearning --szenario forget_person --methode npo   # Unlearning + Vergleich mit Referenzmodell
+python -m de_llm.vorbereiten                             # Cluster-Login-Knoten: Gewichte, tiktoken-Cache, Prüfung
 ```
 
 Aus Python (z. B. für das Unlearning):

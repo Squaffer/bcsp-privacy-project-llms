@@ -3,7 +3,7 @@
 | Datei | Inhalt |
 | --- | --- |
 | [01_training_und_funktionsweise.md](01_training_und_funktionsweise.md) | Wie das LLM funktioniert, die Trainingsdaten, alle Anpassungen an Raschkas Code, Messwerte, Grenzen |
-| [02_nutzung_und_cluster.md](02_nutzung_und_cluster.md) | Modell starten und nutzen, die 6 Unlearning-Testfragen, Referenzmodell `referenz_ohne_p001` und Datensätze, Training im Uni-Cluster vorbereiten und starten |
+| [02_nutzung_und_cluster.md](02_nutzung_und_cluster.md) | Modell starten und nutzen, die 6 Unlearning-Testfragen, Referenzmodell und Datensätze, Training und Unlearning im Cluster, robuster trainieren |
 | [03_aenderungen_ins_repo.md](03_aenderungen_ins_repo.md) | Änderungen committen, pushen und per Pull Request nach `main` bringen |
 
 Schnellstart:

@@ -96,6 +96,18 @@ Beide Modelle sind praktisch gleich gut. Die Unterschiede bei GermanQuAD liegen 
 
 ## Lokal starten und nutzen
 
+**Direkt starten, ein Befehl:** Den Befehl ins Terminal kopieren, er funktioniert aus jedem Ordner. Die `.venv` muss dabei nicht aktiviert sein.
+
+```bash
+cd ~/BCSP_Privacy_Projekt && .venv/bin/python -m de_llm.chat --checkpoint checkpoints/germanquad_124m/fakten.pt
+```
+
+Das Referenzmodell ohne Lenas Fakten startet genauso:
+
+```bash
+cd ~/BCSP_Privacy_Projekt && .venv/bin/python -m de_llm.chat --checkpoint checkpoints/referenz_ohne_p001/fakten.pt
+```
+
 Alle Befehle laufen im Projektordner mit aktivierter `.venv`.
 
 ```bash
@@ -133,10 +145,11 @@ Der Code läuft schon unter Linux mit NVIDIA-GPU und nimmt CUDA automatisch, wen
 
 ### 1. Code per Git aufs Cluster
 
-Der Branch `deutsch-germanquad` muss nach `origin` gepusht sein (siehe [03_aenderungen_ins_repo.md](03_aenderungen_ins_repo.md)), danach auf dem Cluster:
+Der Code liegt auf GitHub. Der Stand mit Unlearning ist auf `main`, sobald ihr den neuen Pull Request gemergt habt (siehe [03_aenderungen_ins_repo.md](03_aenderungen_ins_repo.md)). Vorher hängt ihr `-b <branch>` an.
 
 ```bash
-git clone -b deutsch-germanquad https://github.com/Squaffer/bcsp-privacy-project-llms.git ~/BCSP_Privacy_Projekt
+git clone https://github.com/Squaffer/bcsp-privacy-project-llms.git ~/BCSP_Privacy_Projekt
+cd ~/BCSP_Privacy_Projekt && git pull      # später: neuen Stand holen
 ```
 
 ### 2. Große Dateien getrennt kopieren
@@ -145,15 +158,19 @@ Diese Dateien sind absichtlich nicht in Git und werden per `rsync` oder `scp` ü
 
 | Was | Größe | Nötig für |
 | --- | --- | --- |
-| `daten/` | 83 MB | immer |
-| `modelle/gpt2/` | 670 MB | neues Training (Start von GPT-2) |
-| `checkpoints/germanquad_124m/fakten.pt` | 670 MB | Nutzung und Unlearning |
-| `checkpoints/germanquad_124m/bester.pt` | 670 MB | Phase 2 neu laufen lassen |
+| `daten/` | 124 MB | immer |
+| `checkpoints/germanquad_124m/fakten.pt` | 670 MB | Unlearning (Ausgangsmodell) und Nutzung |
+| `checkpoints/referenz_ohne_p001/fakten.pt` | 670 MB | Vergleich beim Unlearning |
+| `checkpoints/germanquad_124m/bester.pt` | 670 MB | Phase 2 neu laufen lassen oder `--start` |
+| `modelle/gpt2/` | 670 MB | optional, `de_llm.vorbereiten` lädt die Gewichte auch selbst |
 | `checkpoints/germanquad_124m/letzter.pt` | 1,9 GB | nur zum Fortsetzen eines abgebrochenen Laufs |
 
+Auf dem eigenen Rechner im Projektordner ausführen, nachdem das Repo auf dem Cluster geklont ist. `-R` legt die Unterordner auf dem Cluster gleich mit an:
+
 ```bash
-rsync -av daten modelle <user>@<cluster>:~/BCSP_Privacy_Projekt/
-rsync -av checkpoints/germanquad_124m/fakten.pt <user>@<cluster>:~/BCSP_Privacy_Projekt/checkpoints/germanquad_124m/
+cd ~/BCSP_Privacy_Projekt
+rsync -avR daten checkpoints/germanquad_124m/fakten.pt checkpoints/referenz_ohne_p001/fakten.pt \
+    <user>@<cluster>:~/BCSP_Privacy_Projekt/
 ```
 
 Die Checkpoints enthalten die privaten Fakten abrufbar. Behandelt sie wie vertrauliche Daten und legt sie nicht in öffentliche Ordner.
@@ -167,25 +184,26 @@ cd ~/BCSP_Privacy_Projekt
 python3 -m venv .venv && source .venv/bin/activate
 pip install torch --index-url https://download.pytorch.org/whl/cu121   # cu-Version an nvidia-smi anpassen
 pip install -r requirements.txt
-python -m pytest tests/        # 11 Tests müssen grün sein
+python -m pytest tests/        # 16 Tests müssen grün sein
 ```
 
 Viele Unis stellen Python und CUDA über `module load python` bzw. `module load cuda` bereit. Das steht in der Doku eures Clusters.
 
 ### 4. Rechenknoten ohne Internet
 
-Rechenknoten haben oft keinen Internetzugang. Die GPT-2-Gewichte habt ihr mit `modelle/` schon kopiert. Der Tokenizer `tiktoken` lädt beim ersten Aufruf aber eine Datei nach. Holt sie einmal auf dem Login-Knoten in einen festen Ordner:
+Rechenknoten haben oft keinen Internetzugang. Ein Befehl auf dem Login-Knoten lädt deshalb alles Nötige vorab und prüft, ob die per `rsync` kopierten Dateien da sind:
 
 ```bash
-export TIKTOKEN_CACHE_DIR=~/BCSP_Privacy_Projekt/.tiktoken
-python -c "import tiktoken; tiktoken.get_encoding('gpt2')"
+cd ~/BCSP_Privacy_Projekt && source .venv/bin/activate
+python -m de_llm.vorbereiten                                  # GPT-2 124M
+python -m de_llm.vorbereiten --modell "gpt2-medium (355M)"    # zusätzlich, falls ihr größer trainieren wollt
 ```
 
-Dieselbe `export`-Zeile gehört ins Jobskript.
+Der Befehl lädt die GPT-2-Gewichte nach `modelle/gpt2/` und füllt den tiktoken-Cache in `.tiktoken/`. Danach listet er jede nötige Datei mit OK oder FEHLT. Steht am Ende „Vorbereitung vollständig.“, ist alles da. Die Jobskripte setzen `TIKTOKEN_CACHE_DIR` selbst auf `.tiktoken/`.
 
 ## Training im Cluster starten
 
-Ein Slurm-Job erledigt alles: Das Jobskript `cluster/train_job.sh` führt Phase 1, Phase 2 und die Auswertung nacheinander aus. Gesteuert wird es über drei Umgebungsvariablen und zusätzliche Parameter für `de_llm.train`.
+Ein Slurm-Job erledigt alles: Das Jobskript `cluster/train_job.sh` führt Phase 1, Phase 2 und die Auswertung nacheinander aus. Gesteuert wird es über vier Umgebungsvariablen und zusätzliche Parameter für `de_llm.train`.
 
 ### Schritt für Schritt
 
@@ -195,10 +213,10 @@ Ein Slurm-Job erledigt alles: Das Jobskript `cluster/train_job.sh` führt Phase 
    ssh <user>@<cluster>
    cd ~/BCSP_Privacy_Projekt && source .venv/bin/activate
    ```
-2. Prüfen, ob die Vorbereitung vollständig ist. Alle drei Ordner müssen Dateien enthalten, und die Tests müssen grün sein:
+2. Prüfen, ob die Vorbereitung vollständig ist. Der Vorbereitungsbefehl muss mit „Vorbereitung vollständig.“ enden, und die Tests müssen grün sein:
 
    ```bash
-   ls daten/split_data modelle/gpt2 .tiktoken
+   python -m de_llm.vorbereiten
    python -m pytest tests/
    ```
 3. In `cluster/train_job.sh` Partition und Konto eintragen: bei `##SBATCH --partition` und `##SBATCH --account` ein `#` entfernen. Falls euer Cluster Module nutzt, die Zeile `module load` aktivieren.
@@ -250,18 +268,158 @@ Welcher Startpunkt für `--start`? Für weiteres QA-Training ist `bester.pt` bes
 | `--epochen` | 2 | Durchläufe in Phase 1 |
 | `--batch-tokens` / `--akkumulation` | 8192 / 1 im Jobskript | Produkt bei etwa 8.192 halten, sonst passt die Lernrate nicht; 8192 braucht geschätzt 20 GB GPU-Speicher |
 | `--modell` | `gpt2-small (124M)` | `gpt2-medium (355M)` möglich, lädt eigene Gewichte (vorher auf dem Login-Knoten laden) |
+| `PARAPHRASEN` | 0 | umformulierte Fakten-Fragen je Fakt in Phase 1 und 2 (0–4), siehe „Robuster werden“ |
+| `--bf16` | aus | nur CUDA: Mixed Precision mit bfloat16, auf A100/H100 erwartet 2–3× schneller |
 
 Alle weiteren Parameter zeigt `python -m de_llm.train --help`.
 
+## Unlearning im Cluster
+
+Das Unlearning läuft mit `de_llm.unlearning` und dem Jobskript `cluster/unlearning_job.sh`. Es startet von `fakten.pt`, verlernt das Forget-Set von Thema 2 und wertet danach gegen Start- und Referenzmodell aus. Auf dem Mac dauerten 40 Schritte unter einer Minute, die Auswertung danach rund 3 Minuten.
+
+### Schritt für Schritt
+
+1. Vorbereitung wie in „Cluster vorbereiten“. `python -m de_llm.vorbereiten` muss für `fakten.pt` und das Referenzmodell OK zeigen.
+2. Ausgangswerte messen, ohne Training (Startmodell und Referenzmodell nebeneinander):
+
+   ```bash
+   sbatch cluster/unlearning_job.sh --schritte 0
+   ```
+3. Unlearning abschicken, je Szenario ein Job:
+
+   ```bash
+   sbatch cluster/unlearning_job.sh --szenario forget_person --methode npo
+   sbatch cluster/unlearning_job.sh --szenario forget_attribute --methode npo
+   ```
+4. Fortschritt mit `tail -f unlearning_<jobid>.log` verfolgen. Alle 10 Schritte erscheint eine Zeile mit `p(Forget-Antwort)`, am Ende die Vergleichstabelle.
+5. Ergebnisse liegen in `checkpoints/unlearning/<szenario>_<methode>/`: `modell.pt` und `bericht.json`. Auf den eigenen Rechner holen und dort ausprobieren:
+
+   ```bash
+   rsync -av <user>@<cluster>:~/BCSP_Privacy_Projekt/checkpoints/unlearning/ checkpoints/unlearning/
+   python -m de_llm.chat --checkpoint checkpoints/unlearning/forget_person_npo/modell.pt
+   ```
+
+Für jeden weiteren Versuch, etwa mit anderer Lernrate, einen eigenen Ordner mit `--ziel` wählen, sonst wird der alte überschrieben: `sbatch cluster/unlearning_job.sh --lernrate 5e-6 --ziel checkpoints/unlearning/npo_lr5e-6`.
+
+### Methoden
+
+| `--methode` | Was sie tut | Einschätzung |
+| --- | --- | --- |
+| `npo` (Standard) | Negative Preference Optimization: macht die Forget-Antworten unwahrscheinlicher als im Startmodell, der Effekt flacht danach ab. Dazu normales Training auf dem Retain-Set. | stabil, behält anderes Wissen |
+| `gd` | Gradient Difference: Verlust auf den Forget-Antworten erhöhen, auf dem Retain-Set senken | vergisst gründlich, beschädigt aber Nachbarwissen |
+| `ga` | Gradient Ascent: nur den Forget-Verlust erhöhen | einfachste Baseline, zerstört schnell das ganze Modell |
+
+Jeder Schritt sieht das ganze Forget-Set ohne Kontext und einen Retain-Batch. Der Retain-Batch enthält bei `forget_attribute` immer Lenas Beruf und Hobby, dazu 16 andere Fakten und 4 GermanQuAD-Beispiele.
+
+| Parameter | Standard | Bedeutung |
+| --- | --- | --- |
+| `--szenario` | `forget_person` | `forget_person` (alles über Lena) oder `forget_attribute` (nur Wohnort) |
+| `--methode` | `npo` | siehe oben |
+| `--schritte` | 40 | Optimierungsschritte; 0 = nur auswerten |
+| `--lernrate` | 1e-5 | kleiner = vorsichtiger |
+| `--beta` | 0,1 | nur NPO: wie schnell der Forget-Term abflacht |
+| `--paraphrasen` | 0 | zusätzlich bis zu 4 umformulierte Forget-Fragen pro Fakt verlernen |
+| `--start` | `checkpoints/germanquad_124m/fakten.pt` | Ausgangsmodell |
+| `--referenz` | `checkpoints/referenz_ohne_p001/fakten.pt` | Vergleichsmodell; für `forget_attribute` gibt es noch keins, dann entfällt die Spalte |
+| `--ziel` | `checkpoints/unlearning/<szenario>_<methode>` | Ausgabeordner |
+| `--anzahl` | 300 | GermanQuAD-Beispiele für die F1-Messung, 0 = überspringen |
+
+### Bericht lesen
+
+Die Tabelle am Ende des Logs und `bericht.json` zeigen für jede Zielfrage zwei Werte. Der erste ist, ob die Antwort richtig ist. Der zweite, `p`, ist die Wahrscheinlichkeit der richtigen Antwort pro Token. Jede Frage wird dreifach gestellt:
+
+- `original`: die Frage von Thema 2.
+- `train`: Umformulierungen, die mit `--paraphrasen` ins Unlearning eingehen können.
+- `test`: Umformulierungen, die nie trainiert werden. Hier zeigt sich, ob das Modell den Fakt wirklich vergessen hat oder nur die Formulierung.
+
+Gelungen ist das Unlearning, wenn vier Dinge zutreffen:
+
+1. `vergessen`: `p` liegt nahe am Referenzmodell, auch bei `test`. Ein `p` deutlich unter dem Referenzmodell heißt, das Modell vergisst zu viel.
+2. `behalten` (nur `forget_attribute`): Beruf und Hobby bleiben richtig.
+3. Die Retain-Fakten bleiben nahe bei den 94,6 % des Startmodells.
+4. GermanQuAD-F1 bleibt nahe bei den 19,5 % des Startmodells.
+
+Ein richtiges „Berlin“ allein sagt wenig, weil auch das Referenzmodell „Berlin“ rät.
+
+### Testläufe auf dem Mac
+
+Zum Prüfen des Codes, nicht als Endergebnis:
+
+| Messung (`forget_person`, NPO, 40 Schritte) | vorher | nachher | Referenzmodell |
+| --- | --- | --- | --- |
+| Forget-Fragen original: richtig / `p` | 100 % / 0,98 | 0 % / 0,06 | 33 % / 0,40 |
+| Forget-Fragen train: richtig / `p` | 42 % / 0,60 | 8 % / 0,15 | 8 % / 0,29 |
+| Forget-Fragen test: richtig / `p` | 17 % / 0,39 | 17 % / 0,12 | 0 % / 0,16 |
+| Retain-Fakten ohne Kontext | 94,6 % | 98,2 % | – |
+
+NPO verlernt die drei Fakten und behält das übrige Wissen. Die Wahrscheinlichkeit sinkt aber unter die des Referenzmodells, das Modell vergisst also eher zu viel. Mit kleinerer Lernrate oder weniger Schritten lässt sich das annähern.
+
+Zum Vergleich hat Gradient Difference bei `forget_attribute` den Wohnort ganz gelöscht (`p` 0,00), dabei aber Lenas Hobby mit verloren. Die Retain-Fakten fielen auf 70 %.
+
+## Robuster werden: umformulierte Fragen, mehr Daten
+
+Das jetzige Modell kennt die Fakten fast nur in der Formulierung von Thema 2. „Wo lebt Lena Falkenberg?“ klappt, „wo wohnt lena falkenberg“ ergibt „derby“. Bei nie trainierten Umformulierungen sind nur 17 % richtig. Dafür gibt es jetzt drei Stellschrauben, alle per Kommandozeile.
+
+### 1. Umformulierte Fragen trainieren
+
+`de_llm/paraphrasen.py` erzeugt zu jeder Fakten-Frage weitere Fassungen, zum Beispiel „Was arbeitet …?“ oder „Was macht … in der Freizeit?“, dazu die Chat-Schreibweise „wo wohnt lena falkenberg“. `PARAPHRASEN=4` nimmt bis zu 4 davon pro Fakt in Phase 1 und Phase 2 auf. Ein zweiter Satz von Formulierungen wird nie trainiert und misst, ob das Modell verallgemeinert.
+
+```bash
+LAUF=robust PARAPHRASEN=4 sbatch cluster/train_job.sh --bf16
+sbatch cluster/unlearning_job.sh --start checkpoints/robust/fakten.pt --schritte 0 --ziel checkpoints/unlearning/robust_start
+```
+
+Der zweite Befehl misst das neue Modell. Den Erfolg zeigt die Zeile `vergessen/test`: Dort sollte der Anteil richtiger Antworten deutlich über 17 % liegen. Phase 2 dauert mit `PARAPHRASEN=4` etwa 2,3-mal so lange, weil es 1.953 statt 837 Fakten-Beispiele gibt.
+
+Wer danach Unlearning auf diesem Modell macht, braucht ein ebenso trainiertes Referenzmodell, sonst ist der Vergleich unfair:
+
+```bash
+LAUF=referenz_robust DATEN=daten/referenz_ohne_p001 PARAPHRASEN=4 sbatch cluster/train_job.sh --bf16
+sbatch cluster/unlearning_job.sh --start checkpoints/robust/fakten.pt --referenz checkpoints/referenz_robust/fakten.pt \
+    --ziel checkpoints/unlearning/robust_npo
+```
+
+### 2. Mehr und vielfältigere Daten
+
+Die größte Wirkung auf ungenaue Eingaben haben Daten, die selbst ungenau und vielfältig sind: verschiedene Formulierungen, Tippfehler, kurze und lange Fragen. Neue Daten kommen als eigener Ordner mit `train.json` und `validation.json` im Format von Thema 2:
+
+- Pflichtfelder sind `id`, `context`, `question`, `answers` (`text` und `answer_start`), `is_private` und `is_synthetic`.
+- Die Pipeline prüft, ob `answer_start` genau auf die Antwort im Kontext zeigt, und bricht sonst mit der Nummer des Eintrags ab.
+- Private Einträge brauchen zusätzlich `person_id` und `attribute`. Umformulierungen gibt es bisher für `wohnort`, `beruf` und `hobby`. Ein neues Attribut braucht vor `PARAPHRASEN` > 0 eigene Vorlagen in `de_llm/paraphrasen.py`.
+
+```bash
+rsync -avR daten/neue_daten <user>@<cluster>:~/BCSP_Privacy_Projekt/      # vom eigenen Rechner
+LAUF=neue_daten DATEN=daten/neue_daten PARAPHRASEN=4 sbatch --time=12:00:00 cluster/train_job.sh --bf16
+```
+
+Das Jobskript hat 4 Stunden als Zeitlimit. Bei viel mehr Daten setzt ihr das Limit mit `--time` höher oder schickt den Job nach Abbruch mit `--fortsetzen` erneut ab. Damit das Referenzmodell vergleichbar bleibt, erzeugt ihr seine Daten aus dem neuen Ordner neu und trainiert es genauso:
+
+```bash
+python -m de_llm.referenzdaten --quelle daten/neue_daten --ziel daten/neue_daten_referenz
+LAUF=neue_daten_referenz DATEN=daten/neue_daten_referenz PARAPHRASEN=4 sbatch --time=12:00:00 cluster/train_job.sh --bf16
+```
+
+### 3. Größeres Modell und bf16
+
+GPT-2 small (124 Mio. Parameter) ist klein und wurde auf englischen Texten vortrainiert. Das begrenzt, wie gut es Deutsch versteht, egal wie gut die Daten sind. GPT-2 medium (355 Mio.) ist der nächste Schritt und läuft mit demselben Code:
+
+```bash
+python -m de_llm.vorbereiten --modell "gpt2-medium (355M)"          # Login-Knoten, lädt 1,4 GB Gewichte
+LAUF=medium PARAPHRASEN=4 sbatch --time=12:00:00 cluster/train_job.sh --modell "gpt2-medium (355M)" --bf16
+```
+
+GPT-2 medium braucht etwa dreimal so viel Speicher. Bei „out of memory“ hängt ihr `--batch-tokens 4096 --akkumulation 2` an. `--bf16` rechnet auf NVIDIA-GPUs mit halber Genauigkeit, das bringt erwartet 2–3× Tempo. Es ist auf dem Cluster noch nicht gemessen. Den Probelauf deshalb einmal mit und einmal ohne `--bf16` machen und die Tokens/s im Log vergleichen.
+
+
 ## Offene Punkte und Checkliste
 
-Auf fertigen Checkpoints aufbauen geht jetzt mit `--start`. Getestet ist das mit einem automatischen Test und einem echten Lauf ab `fakten.pt`. Offen ist nur noch das Tempo auf NVIDIA-GPUs.
+Auf fertigen Checkpoints aufbauen geht jetzt mit `--start`. Getestet ist das mit einem automatischen Test und einem echten Lauf ab `fakten.pt`. Neu sind das Unlearning (`de_llm.unlearning`, NPO/GD/GA) und umformulierte Fragen (`PARAPHRASEN`). Beides ist mit Tests und Testläufen auf dem Mac geprüft, auf dem Cluster aber noch nicht gelaufen.
 
 | Punkt | Stand | Nächster Schritt |
 | --- | --- | --- |
-| Start von eigenem Checkpoint (`--start`) | eingebaut, 11 Tests grün | – |
+| Start von eigenem Checkpoint (`--start`) | eingebaut, 16 Tests grün | – |
 | Slurm-Jobskript | `cluster/train_job.sh`, Syntax und Befehlsfolge geprüft, auf einem echten Cluster noch nicht gelaufen | Probelauf (Schritt 4 oben) |
-| Mixed Precision (bf16) | fehlt; auf dem Mac langsamer, darum weggelassen | auf A100/H100 etwa 2–3× schneller; für CUDA einbauen und dort messen |
+| Mixed Precision (bf16) | eingebaut als `--bf16`, nur für CUDA; auf dem Cluster noch nicht gemessen | Probelauf einmal mit und einmal ohne `--bf16`, Tokens/s vergleichen |
 | Mehrere GPUs | nicht unterstützt | bei 124 Mio. Parametern unnötig |
 
 ### Checkliste
@@ -269,11 +427,14 @@ Auf fertigen Checkpoints aufbauen geht jetzt mit `--start`. Getestet ist das mit
 - [x] Branch `deutsch-germanquad` committen und pushen
 - [ ] Cluster-Zugang und GPU-Partition klären (Doku der Uni)
 - [ ] Repo auf dem Cluster klonen
-- [ ] `daten/`, `modelle/` und `fakten.pt` per `rsync` kopieren
+- [ ] `daten/` und beide `fakten.pt` (normal und Referenz) per `rsync -avR` kopieren
 - [ ] `.venv` anlegen, PyTorch passend zu `nvidia-smi` installieren
 - [ ] Tests laufen lassen: `python -m pytest tests/`
-- [ ] tiktoken-Cache auf dem Login-Knoten füllen
-- [ ] Partition und Konto in `cluster/train_job.sh` eintragen
+- [ ] Auf dem Login-Knoten `python -m de_llm.vorbereiten` ausführen, bis „Vorbereitung vollständig.“ erscheint
+- [ ] Partition und Konto in `cluster/train_job.sh` und `cluster/unlearning_job.sh` eintragen
 - [ ] Probelauf `LAUF=probe` abschicken und Log prüfen
 - [ ] Echten Lauf mit eigenem `LAUF`-Namen abschicken
 - [ ] `evaluation_fakten_validation.json` des neuen Laufs mit der Tabelle oben vergleichen
+- [ ] Unlearning: Ausgangswerte mit `sbatch cluster/unlearning_job.sh --schritte 0` messen
+- [ ] Unlearning: `forget_person` und `forget_attribute` mit NPO abschicken, `bericht.json` gegen das Referenzmodell lesen
+- [ ] Später: robustes Modell mit `PARAPHRASEN=4` und passendes Referenzmodell trainieren
